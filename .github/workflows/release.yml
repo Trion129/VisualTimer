@@ -53,6 +53,9 @@ jobs:
         host: 'windows'
         target: 'desktop'
         arch: 'win64_msvc2019_64'
+        tools: 'tools_openssl_x64'  # Include OpenSSL
+        cache: true                 # Cache the installation to speed up future runs
+        setup-python: false         # We don't need Python for this
 
     - name: Configure CMake for Linux
       if: runner.os == 'Linux'
@@ -95,19 +98,46 @@ jobs:
         # Copy the executable
         Copy-Item "${{ steps.strings.outputs.build-output-dir }}/Release/VisualTimer.exe" -Destination $release_dir
         
-        # Copy required Qt DLLs
-        $qt_bin_dir = "${{ env.Qt5_DIR }}/../../bin"
-        Copy-Item "$qt_bin_dir/Qt5Core.dll" -Destination $release_dir
-        Copy-Item "$qt_bin_dir/Qt5Gui.dll" -Destination $release_dir
-        Copy-Item "$qt_bin_dir/Qt5Widgets.dll" -Destination $release_dir
+        # Debug Qt installation 
+        Write-Host "Qt Directory Check:"
+        Get-ChildItem env:Qt*
         
-        # Create platform plugins directory
-        $platforms_dir = "$release_dir/platforms"
-        New-Item -Path $platforms_dir -ItemType Directory -Force
-        Copy-Item "$qt_bin_dir/../plugins/platforms/qwindows.dll" -Destination $platforms_dir
+        # Use windeployqt to handle dependencies automatically
+        Write-Host "Looking for windeployqt..."
+        $windeployqt_paths = @(
+          "C:\Qt\5.15.2\msvc2019_64\bin\windeployqt.exe",
+          "D:\a\VisualTimer\Qt\5.15.2\msvc2019_64\bin\windeployqt.exe"
+        )
+        
+        foreach ($path in $windeployqt_paths) {
+          if (Test-Path $path) {
+            Write-Host "Found windeployqt at $path"
+            # Use windeployqt to gather all dependencies
+            & $path --no-translations --no-system-d3d-compiler --no-opengl-sw "$release_dir\VisualTimer.exe"
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "windeployqt completed successfully"
+              break
+            } else {
+              Write-Host "windeployqt failed with exit code $LASTEXITCODE"
+            }
+          }
+        }
         
         # Create ZIP archive
-        Compress-Archive -Path $release_dir\* -DestinationPath "${{ github.workspace }}/${{ matrix.artifact_name }}.zip"
+        Write-Host "Creating ZIP archive from $release_dir"
+        Get-ChildItem -Path $release_dir -Recurse | Select-Object FullName
+        
+        # Make sure paths use Windows separators
+        $zip_path = "${{ github.workspace }}\${{ matrix.artifact_name }}.zip"
+        $zip_path = $zip_path -replace "/", "\"
+        
+        # Use PowerShell's Compress-Archive
+        if (Test-Path -Path $release_dir -PathType Container) {
+          Compress-Archive -Path "$release_dir\*" -DestinationPath $zip_path -Force
+          Write-Host "Created archive at $zip_path"
+        } else {
+          Write-Error "Release directory not found at $release_dir"
+        }
 
     - name: Package for Linux
       if: runner.os == 'Linux'
