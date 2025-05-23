@@ -7,12 +7,14 @@ on:
 
 jobs:
   build:
-    name: Build and Package
+    # Reuse the exact same build configuration from the multi-platform workflow
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        build_type: [Release]
+        c_compiler: [gcc, clang, cl]
         include:
           - os: windows-latest
             c_compiler: cl
@@ -24,6 +26,18 @@ jobs:
             cpp_compiler: g++
             artifact_name: VisualTimer-Linux
             asset_name: VisualTimer-Linux.tar.gz
+          - os: ubuntu-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            artifact_name: VisualTimer-Linux-Clang
+            asset_name: VisualTimer-Linux-Clang.tar.gz
+        exclude:
+          - os: windows-latest
+            c_compiler: gcc
+          - os: windows-latest
+            c_compiler: clang
+          - os: ubuntu-latest
+            c_compiler: cl
     
     steps:
     - uses: actions/checkout@v4
@@ -35,16 +49,19 @@ jobs:
         echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
         echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
+    # Install Qt on Ubuntu - Same as in multi-platform workflow
     - name: Install Qt on Ubuntu
       if: runner.os == 'Linux'
       run: |
         sudo apt update
         sudo apt install -y qtbase5-dev qt5-qmake
 
+    # Set up MSVC on Windows - Same as in multi-platform workflow
     - name: Set up MSVC
       if: runner.os == 'Windows'
       uses: ilammy/msvc-dev-cmd@v1
       
+    # Install Qt on Windows - Same as in multi-platform workflow
     - name: Install Qt on Windows
       if: runner.os == 'Windows'
       uses: jurplel/install-qt-action@v3
@@ -53,10 +70,8 @@ jobs:
         host: 'windows'
         target: 'desktop'
         arch: 'win64_msvc2019_64'
-        tools: 'tools_openssl_x64'  # Include OpenSSL
-        cache: true                 # Cache the installation to speed up future runs
-        setup-python: false         # We don't need Python for this
 
+    # Configure CMake - Same as in multi-platform workflow
     - name: Configure CMake for Linux
       if: runner.os == 'Linux'
       shell: bash
@@ -64,7 +79,7 @@ jobs:
         cmake -B ${{ steps.strings.outputs.build-output-dir }}
         -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
         -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         -S ${{ github.workspace }}
         
     - name: Configure CMake for Windows
@@ -81,114 +96,93 @@ jobs:
         cmake -B $build_dir `
         -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} `
         -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} `
-        -DCMAKE_BUILD_TYPE=Release `
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} `
         -S $workspace
 
+    # Build - Same as in multi-platform workflow
     - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
 
+    # Package the application for distribution
     - name: Package for Windows
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && matrix.c_compiler == 'cl'
       shell: powershell
       run: |
-        # Create a directory for the final package
-        $release_dir = "${{ github.workspace }}/release"
-        New-Item -Path $release_dir -ItemType Directory -Force
+        # Create a directory for the package
+        $package_dir = "package"
+        New-Item -Path $package_dir -ItemType Directory -Force
         
         # Copy the executable
-        Copy-Item "${{ steps.strings.outputs.build-output-dir }}/Release/VisualTimer.exe" -Destination $release_dir
+        Copy-Item "${{ steps.strings.outputs.build-output-dir }}/Release/VisualTimer.exe" -Destination $package_dir/
         
-        # Debug Qt installation 
-        Write-Host "Qt Directory Check:"
-        Get-ChildItem env:Qt*
-        
-        # Use windeployqt to handle dependencies automatically
-        Write-Host "Looking for windeployqt..."
-        $windeployqt_paths = @(
-          "C:\Qt\5.15.2\msvc2019_64\bin\windeployqt.exe",
-          "D:\a\VisualTimer\Qt\5.15.2\msvc2019_64\bin\windeployqt.exe"
-        )
-        
-        foreach ($path in $windeployqt_paths) {
-          if (Test-Path $path) {
-            Write-Host "Found windeployqt at $path"
-            # Use windeployqt to gather all dependencies
-            & $path --no-translations --no-system-d3d-compiler --no-opengl-sw "$release_dir\VisualTimer.exe"
-            if ($LASTEXITCODE -eq 0) {
-              Write-Host "windeployqt completed successfully"
-              break
-            } else {
-              Write-Host "windeployqt failed with exit code $LASTEXITCODE"
-            }
+        # Use windeployqt from Qt installation
+        $qt_bin = Get-ChildItem env:QTDIR | Select-Object -ExpandProperty Value
+        if ($qt_bin) {
+          $qt_bin = "$qt_bin\bin"
+          $windeployqt = "$qt_bin\windeployqt.exe"
+          if (Test-Path $windeployqt) {
+            & $windeployqt --no-translations --release $package_dir/VisualTimer.exe
+          } else {
+            Write-Host "windeployqt.exe not found, packaging only the executable"
           }
         }
         
-        # Create ZIP archive
-        Write-Host "Creating ZIP archive from $release_dir"
-        Get-ChildItem -Path $release_dir -Recurse | Select-Object FullName
-        
-        # Make sure paths use Windows separators
-        $zip_path = "${{ github.workspace }}\${{ matrix.artifact_name }}.zip"
-        $zip_path = $zip_path -replace "/", "\"
-        
-        # Use PowerShell's Compress-Archive
-        if (Test-Path -Path $release_dir -PathType Container) {
-          Compress-Archive -Path "$release_dir\*" -DestinationPath $zip_path -Force
-          Write-Host "Created archive at $zip_path"
-        } else {
-          Write-Error "Release directory not found at $release_dir"
-        }
+        # Create the ZIP file
+        Compress-Archive -Path $package_dir\* -DestinationPath "${{ matrix.artifact_name }}.zip" -Force
 
     - name: Package for Linux
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        # Create a directory for the final package
-        mkdir -p release
+        # Create a directory for the package
+        mkdir -p package
         
         # Copy the executable
-        cp ${{ steps.strings.outputs.build-output-dir }}/VisualTimer release/
+        cp ${{ steps.strings.outputs.build-output-dir }}/VisualTimer package/
         
         # Create a launcher script
-        cat > release/run_visualtimer.sh << 'EOL'
+        cat > package/run_visualtimer.sh << 'EOL'
         #!/bin/bash
         # Set up the correct library path
         export LD_LIBRARY_PATH="$(dirname "$0")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         # Run the application
         "$(dirname "$0")/VisualTimer" "$@"
         EOL
+        chmod +x package/run_visualtimer.sh
         
-        chmod +x release/run_visualtimer.sh
-        
-        # Create tarball
-        tar -czvf ${{ matrix.artifact_name }}.tar.gz -C release .
+        # Create tarball 
+        tar -czf ${{ matrix.artifact_name }}.tar.gz -C package .
 
-    - name: Upload artifacts
+    # Upload artifacts for the release
+    - name: Upload Artifacts for Release
+      if: |
+        (runner.os == 'Windows' && matrix.c_compiler == 'cl') || 
+        (runner.os == 'Linux' && matrix.c_compiler == 'gcc')
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.artifact_name }}
         path: ${{ github.workspace }}/${{ matrix.asset_name }}
+        retention-days: 1
         if-no-files-found: error
 
+  # Create a GitHub release with the artifacts
   release:
-    name: Create Release
+    name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
-        
-      - name: List downloaded artifacts
-        run: |
-          find . -type f -name "*.zip" -o -name "*.tar.gz"
-          
-      - name: Create Release
-        id: create_release
+      
+      - name: Display Downloaded Files
+        run: find . -type f
+      
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            ./**/VisualTimer-Windows.zip
-            ./**/VisualTimer-Linux.tar.gz
+            ./VisualTimer-Windows/VisualTimer-Windows.zip
+            ./VisualTimer-Linux/VisualTimer-Linux.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true
