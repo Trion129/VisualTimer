@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=Visual Timer
+Comment=A visual timer application
+Exec=@CMAKE_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@/VisualTimer
+Icon=visualtimer
+Terminal=false
+Type=Application
+Categories=Utility;Qt;
+Keywords=timer;countdown;

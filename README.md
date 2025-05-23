@@ -21,9 +21,32 @@ The Visual Timer application is a simple yet effective countdown timer tool buil
    make
    ```
 
-4. **Run the application**:
+4. **Install the application (optional)**:
+   ```
+   sudo make install
+   ```
+   This will install:
+   - The executable to `/usr/local/bin/VisualTimer`
+   - A desktop entry in `/usr/local/share/applications/`
+   - The application icon in `/usr/local/share/icons/`
+
+   After installation, you can launch the application from your system's application menu
+   or by typing `VisualTimer` in the terminal.
+
+   To install to a user directory instead (no sudo required):
+   ```
+   cmake -DCMAKE_INSTALL_PREFIX=$HOME/.local ..
+   make
+   make install
+   ```
+
+5. **Run the application**:
    ```
    ./VisualTimer
+   ```
+   Or if installed:
+   ```
+   VisualTimer
    ```
 
 ## Usage
