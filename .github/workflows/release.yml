@@ -115,16 +115,34 @@ jobs:
         # Copy the executable
         Copy-Item "${{ steps.strings.outputs.build-output-dir }}/Release/VisualTimer.exe" -Destination $package_dir/
         
-        # Use windeployqt from Qt installation
-        $qt_bin = Get-ChildItem env:QTDIR | Select-Object -ExpandProperty Value
-        if ($qt_bin) {
-          $qt_bin = "$qt_bin\bin"
-          $windeployqt = "$qt_bin\windeployqt.exe"
-          if (Test-Path $windeployqt) {
-            & $windeployqt --no-translations --release $package_dir/VisualTimer.exe
-          } else {
-            Write-Host "windeployqt.exe not found, packaging only the executable"
+        # Print all environment variables for debugging
+        Write-Host "Environment variables containing 'Qt':"
+        Get-ChildItem env: | Where-Object { $_.Name -like "*Qt*" }
+        
+        # Try to find windeployqt in various locations
+        $potential_paths = @(
+          "$env:Qt5_DIR\..\..\bin\windeployqt.exe",
+          "$env:IQTA_TOOLS\windeployqt.exe",
+          "C:\Qt\5.15.2\msvc2019_64\bin\windeployqt.exe",
+          "D:\a\VisualTimer\Qt\5.15.2\msvc2019_64\bin\windeployqt.exe"
+        )
+        
+        $windeployqt = ""
+        foreach ($path in $potential_paths) {
+          Write-Host "Checking for windeployqt at: $path"
+          if (Test-Path $path) {
+            $windeployqt = $path
+            Write-Host "Found windeployqt at: $windeployqt"
+            break
           }
+        }
+        
+        if ($windeployqt) {
+          # Use windeployqt to copy Qt dependencies
+          Write-Host "Running: $windeployqt --no-translations --release $package_dir/VisualTimer.exe"
+          & $windeployqt --no-translations --release "$package_dir\VisualTimer.exe"
+        } else {
+          Write-Host "windeployqt.exe not found, packaging only the executable"
         }
         
         # Create the ZIP file
@@ -154,14 +172,21 @@ jobs:
         tar -czf ${{ matrix.artifact_name }}.tar.gz -C package .
 
     # Upload artifacts for the release
-    - name: Upload Artifacts for Release
-      if: |
-        (runner.os == 'Windows' && matrix.c_compiler == 'cl') || 
-        (runner.os == 'Linux' && matrix.c_compiler == 'gcc')
+    - name: Upload Artifacts for Release (Windows)
+      if: runner.os == 'Windows' && matrix.c_compiler == 'cl'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.artifact_name }}
-        path: ${{ github.workspace }}/${{ matrix.asset_name }}
+        path: ${{ matrix.artifact_name }}.zip
+        retention-days: 1
+        if-no-files-found: error
+        
+    - name: Upload Artifacts for Release (Linux)
+      if: runner.os == 'Linux' && matrix.c_compiler == 'gcc'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: ${{ matrix.artifact_name }}.tar.gz
         retention-days: 1
         if-no-files-found: error
 
