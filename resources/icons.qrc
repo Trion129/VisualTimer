@@ -1,0 +1,9 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource>
+    <file>icons/timer_icon.svg</file>
+    <file>icons/start_icon.svg</file>
+    <file>icons/stop_icon.svg</file>
+    <file>icons/reset_icon.svg</file>
+    <file>icons/pause_icon.svg</file>
+</qresource>
+</RCC>
