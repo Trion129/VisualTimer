@@ -90,7 +90,7 @@ jobs:
       run: |
         # Create a directory for the final package
         $release_dir = "${{ github.workspace }}/release"
-        mkdir -p $release_dir
+        New-Item -Path $release_dir -ItemType Directory -Force
         
         # Copy the executable
         Copy-Item "${{ steps.strings.outputs.build-output-dir }}/Release/VisualTimer.exe" -Destination $release_dir
@@ -103,7 +103,7 @@ jobs:
         
         # Create platform plugins directory
         $platforms_dir = "$release_dir/platforms"
-        mkdir -p $platforms_dir
+        New-Item -Path $platforms_dir -ItemType Directory -Force
         Copy-Item "$qt_bin_dir/../plugins/platforms/qwindows.dll" -Destination $platforms_dir
         
         # Create ZIP archive
@@ -134,7 +134,7 @@ jobs:
         tar -czvf ${{ matrix.artifact_name }}.tar.gz -C release .
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.artifact_name }}
         path: ${{ github.workspace }}/${{ matrix.asset_name }}
@@ -146,15 +146,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         
+      - name: List downloaded artifacts
+        run: |
+          find . -type f -name "*.zip" -o -name "*.tar.gz"
+          
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            VisualTimer-Windows/VisualTimer-Windows.zip
-            VisualTimer-Linux/VisualTimer-Linux.tar.gz
+            ./**/VisualTimer-Windows.zip
+            ./**/VisualTimer-Linux.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true
