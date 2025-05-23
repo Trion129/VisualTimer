@@ -1,0 +1,160 @@
+name: Build and Create Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger on tags that start with 'v' (like v1.0.0)
+
+jobs:
+  build:
+    name: Build and Package
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+            artifact_name: VisualTimer-Windows
+            asset_name: VisualTimer-Windows.zip
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            artifact_name: VisualTimer-Linux
+            asset_name: VisualTimer-Linux.tar.gz
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set reusable strings
+      id: strings
+      shell: bash
+      run: |
+        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+        echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+    - name: Install Qt on Ubuntu
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt update
+        sudo apt install -y qtbase5-dev qt5-qmake
+
+    - name: Set up MSVC
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      
+    - name: Install Qt on Windows
+      if: runner.os == 'Windows'
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: '5.15.2'
+        host: 'windows'
+        target: 'desktop'
+        arch: 'win64_msvc2019_64'
+
+    - name: Configure CMake for Linux
+      if: runner.os == 'Linux'
+      shell: bash
+      run: >
+        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_BUILD_TYPE=Release
+        -S ${{ github.workspace }}
+        
+    - name: Configure CMake for Windows
+      if: runner.os == 'Windows'
+      shell: powershell
+      run: |
+        $build_dir = "${{ steps.strings.outputs.build-output-dir }}"
+        $workspace = "${{ github.workspace }}"
+        
+        # Ensure we're using proper Windows paths
+        $build_dir = $build_dir -replace '/', '\'
+        $workspace = $workspace -replace '/', '\'
+        
+        cmake -B $build_dir `
+        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} `
+        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} `
+        -DCMAKE_BUILD_TYPE=Release `
+        -S $workspace
+
+    - name: Build
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release
+
+    - name: Package for Windows
+      if: runner.os == 'Windows'
+      shell: powershell
+      run: |
+        # Create a directory for the final package
+        $release_dir = "${{ github.workspace }}/release"
+        mkdir -p $release_dir
+        
+        # Copy the executable
+        Copy-Item "${{ steps.strings.outputs.build-output-dir }}/Release/VisualTimer.exe" -Destination $release_dir
+        
+        # Copy required Qt DLLs
+        $qt_bin_dir = "${{ env.Qt5_DIR }}/../../bin"
+        Copy-Item "$qt_bin_dir/Qt5Core.dll" -Destination $release_dir
+        Copy-Item "$qt_bin_dir/Qt5Gui.dll" -Destination $release_dir
+        Copy-Item "$qt_bin_dir/Qt5Widgets.dll" -Destination $release_dir
+        
+        # Create platform plugins directory
+        $platforms_dir = "$release_dir/platforms"
+        mkdir -p $platforms_dir
+        Copy-Item "$qt_bin_dir/../plugins/platforms/qwindows.dll" -Destination $platforms_dir
+        
+        # Create ZIP archive
+        Compress-Archive -Path $release_dir\* -DestinationPath "${{ github.workspace }}/${{ matrix.artifact_name }}.zip"
+
+    - name: Package for Linux
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        # Create a directory for the final package
+        mkdir -p release
+        
+        # Copy the executable
+        cp ${{ steps.strings.outputs.build-output-dir }}/VisualTimer release/
+        
+        # Create a launcher script
+        cat > release/run_visualtimer.sh << 'EOL'
+        #!/bin/bash
+        # Set up the correct library path
+        export LD_LIBRARY_PATH="$(dirname "$0")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        # Run the application
+        "$(dirname "$0")/VisualTimer" "$@"
+        EOL
+        
+        chmod +x release/run_visualtimer.sh
+        
+        # Create tarball
+        tar -czvf ${{ matrix.artifact_name }}.tar.gz -C release .
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: ${{ github.workspace }}/${{ matrix.asset_name }}
+        if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            VisualTimer-Windows/VisualTimer-Windows.zip
+            VisualTimer-Linux/VisualTimer-Linux.tar.gz
+          draft: false
+          prerelease: false
+          generate_release_notes: true

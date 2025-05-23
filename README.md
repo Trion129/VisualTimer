@@ -34,6 +34,28 @@ The Visual Timer application is a simple yet effective countdown timer tool buil
 - Click the Reset icon to reset the timer to your last set time.
 - The timer shows remaining time with second precision both visually and in digital format.
 
+## Releases
+
+### Installing from Releases
+1. Go to the [Releases](https://github.com/Trion129/VisualTimer/releases) page on GitHub
+2. Download the appropriate package for your operating system:
+   - For Windows: Download `VisualTimer-Windows.zip`, extract it, and run `VisualTimer.exe`
+   - For Linux: Download `VisualTimer-Linux.tar.gz`, extract it, and run `./run_visualtimer.sh`
+
+### Creating a New Release
+To create a new release:
+
+1. Update the version number in relevant files (if applicable)
+2. Create and push a new tag:
+   ```
+   git tag -a v1.0.0 -m "Release v1.0.0"
+   git push origin v1.0.0
+   ```
+3. GitHub Actions will automatically:
+   - Build the application for Windows and Linux
+   - Create a new release with these builds attached
+   - Generate release notes based on commits since the last release
+
 ## Contributing
 Feel free to submit issues or pull requests for any enhancements or bug fixes. 
 
